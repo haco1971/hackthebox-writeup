@@ -1323,7 +1323,7 @@ file password_backup
 then change file extension to the type of file it its and decompress
 then again check file, change extension, decompress until you get something readable
 5)Now we got the password: for floris user which is : 5d<wdCbdZu)|hChXll
-6)login in through ssh and get the user flag.
+6)login in through ssh and get the user flag.65dd1df0713b40d88ead98cf11b8530b
 7)Now for privilege scalation
 8)We see a folder called admin-area its seems suspicious so we go to dir and we found to files one called input which parses all 127.0.0.1 data to the other file named report. and its running as root! so we can take advantage on this:
 On the input file we can overwrite its contents and put:
