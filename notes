@@ -1742,7 +1742,7 @@ HTB FROLIC
 13)found dir with gobuster and medium dic for playsms
 14)get a meterpreter session with
 exploit/multi/http/playsms_uploadcsv_exec user and pass you got
-15)get the user flag
+15)get the user flag。2ab95909cf509f85a6f476b59a0c2fe0
 16)ldd rop to know the lib adrres its using
 17)export PATH=/usr/lib/gcc/i686-linux-gnu/5:/sbin:/bin:/usr/sbin:/usr/bin
 18)start searching for system, execve, exit and /bin/sh adresss
