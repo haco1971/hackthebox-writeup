@@ -1603,7 +1603,7 @@ on first attemp with creds its shows us some shells running but instantly logged
 12)After so much strugging i found to login with a the creds into a powershell we must provide the full path user
  
 MACHINE\User   so its GIDDY\Stacy
-13)And we managed to login and grab the user flag
+13)And we managed to login and grab the user flag.10C1C275385280605E96ADD808C1A0AD
 14)now into priv scalation
 15)Running basic enumeration for win machines was able to found not so much
 16)Then in stacy Documents Folder we found an app called Unify-video
